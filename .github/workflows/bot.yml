@@ -1,82 +1,53 @@
-# ╔══════════════════════════════════════════════════════════╗
-# ║  ⚡ HiVo Compressor — Auto-Run on GitHub Actions         ║
-# ║  🔄 Self-Restarting | 🚀 FFmpeg | 💾 Persistent Data      ║
-# ╚══════════════════════════════════════════════════════════╝
+# ╔══════════════════════════════════════════════════════════════╗
+# ║   ⚡ HiVo Compressor — Production Bot                        ║
+# ║   🚀 FFmpeg | Zstd | WebP | PDF | Self-Restarting            ║
+# ║   💾 Persistent Data | 🔄 24/7 Uptime                        ║
+# ╚══════════════════════════════════════════════════════════════╝
 
-name: ⚡ HiVo Compressor Bot
+name: ⚡ HiVo Compressor
 
 on:
   schedule:
-    # هر ۵ ساعت یک بار (چون سقف اجرا ۶ ساعته)
-    - cron: '0 */5 * * *'
-  workflow_dispatch:
+    - cron: '0 */5 * * *'      # هر ۵ ساعت
+  workflow_dispatch:            # اجرای دستی
   push:
     branches: [main]
     paths-ignore:
       - 'data/**'
       - 'README.md'
+      - 'assets/**'
 
-# جلوگیری از اجرای همزمان چند نسخه
 concurrency:
-  group: hivo-compressor
+  group: hivo-compressor-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   FORCE_COLOR: "1"
   TERM: "xterm-256color"
   PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
   TEMP_DIR: "/tmp/hivo"
+  OMP_NUM_THREADS: "4"
 
 jobs:
-  run-bot:
-    name: 🤖 Run Telegram Bot
+  bot:
+    name: 🤖 HiVo Compressor Runtime
     runs-on: ubuntu-latest
-    timeout-minutes: 350      # ~۵ ساعت و ۵۰ دقیقه (زیر سقف ۶ ساعت)
+    timeout-minutes: 350
     permissions:
-      contents: write          # برای commit کردن data/
+      contents: write
+      actions: write
 
     steps:
-      # ─────────── 📥 Checkout ───────────
+      # ═══════════ 📥 Checkout ═══════════
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ─────────── 🐍 Python ───────────
-      - name: 🐍 Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      # ─────────── 🎬 FFmpeg + Tools ───────────
-      - name: 🎬 Install FFmpeg & compression tools
-        run: |
-          echo "::group::📦 Installing system tools"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            ffmpeg \
-            zstd \
-            p7zip-full \
-            libimage-exiftool-perl \
-            webp \
-            pngquant \
-            jpegoptim
-          echo "::endgroup::"
-          ffmpeg -version | head -1
-          zstd --version
-
-      # ─────────── 📦 Python deps ───────────
-      - name: 📦 Install Python dependencies
-        run: |
-          echo "::group::🐍 Installing pip packages"
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          echo "::endgroup::"
-
-      # ─────────── 💾 Restore data cache ───────────
-      - name: 💾 Restore user data
+      # ═══════════ 💾 Restore cache ═══════════
+      - name: 💾 Restore data cache
         uses: actions/cache@v4
         with:
           path: data/
@@ -84,63 +55,116 @@ jobs:
           restore-keys: |
             hivo-data-
 
-      # ─────────── 🚀 Run Bot ───────────
-      - name: 🚀 Start HiVo Compressor Bot
-        id: bot
-        continue-on-error: true
-        env:
-          BOT_TOKEN:   ${{ secrets.BOT_TOKEN }}
-          ADMIN_ID:    ${{ secrets.ADMIN_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO:     ${{ github.repository }}
-          RUN_ID:      ${{ github.run_id }}
+      - name: 🎬 Cache FFmpeg & tools
+        uses: actions/cache@v4
+        with:
+          path: /usr/bin/ffmpeg
+          key: ffmpeg-${{ runner.os }}-v1
+
+      # ═══════════ 🐍 Python ═══════════
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ═══════════ 🎬 System tools ═══════════
+      - name: 🎬 Install compression engines
         run: |
-          echo "::group::⚡ Bot is starting..."
-          # اجرا با محدودیت زمانی داخلی (۵ ساعت ۳۰ دقیقه)
-          timeout 19800 python main.py || echo "Bot stopped (timeout or exit)"
+          echo "::group::📦 System packages"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            ffmpeg \
+            zstd \
+            p7zip-full \
+            brotli \
+            ghostscript \
+            webp \
+            jpegoptim \
+            optipng \
+            pngquant \
+            libimage-exiftool-perl \
+            imagemagick \
+            parallel
           echo "::endgroup::"
 
-      # ─────────── 💾 Commit data changes ───────────
-      - name: 💾 Save data to repo
+          echo "::group::🔍 Verify versions"
+          ffmpeg -version | head -1
+          zstd --version
+          cwebp -version 2>&1 | head -1
+          gs --version
+          7z | head -3 | tail -1
+          echo "::endgroup::"
+
+      # ═══════════ 📦 Python deps ═══════════
+      - name: 📦 Install Python dependencies
+        run: |
+          echo "::group::🐍 pip install"
+          python -m pip install --upgrade pip --quiet
+          pip install -r requirements.txt --quiet
+          echo "::endgroup::"
+
+      # ═══════════ 🚀 Run bot ═══════════
+      - name: 🚀 Run HiVo Compressor
+        id: run
+        continue-on-error: true
+        env:
+          BOT_TOKEN:      ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID:       ${{ secrets.ADMIN_ID }}
+          GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO:    ${{ github.repository }}
+          GITHUB_RUN_ID:  ${{ github.run_id }}
+          SUPPORT_USER:   ${{ secrets.SUPPORT_USER }}
+        run: |
+          echo "::group::⚡ Starting bot..."
+          timeout 19800 python main.py || echo "Bot exited: $?"
+          echo "::endgroup::"
+
+      # ═══════════ 💾 Save data ═══════════
+      - name: 💾 Commit data to repo
         if: always()
         run: |
           echo "::group::💾 Committing data"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/ || true
+          git add data/ 2>/dev/null || true
           if ! git diff --staged --quiet; then
-            git commit -m "🤖 Auto-update data [skip ci]"
-            git push || echo "Push failed (maybe no changes)"
+            git commit -m "🤖 Auto-update: $(date -u +%Y-%m-%d_%H:%M) [skip ci]"
+            git push || echo "⚠️ Push failed"
           else
-            echo "No changes to commit"
+            echo "ℹ️ No changes"
           fi
           echo "::endgroup::"
 
-      # ─────────── 🔄 Self Restart ───────────
+      # ═══════════ 🔄 Self-restart ═══════════
       - name: 🔄 Schedule next run
-        if: always()
+        if: always() && github.event_name != 'schedule'
         run: |
-          echo "::group::🔄 Triggering next run"
+          echo "::group::🔄 Triggering next"
           curl -s -X POST \
             -H "Authorization: token ${{ secrets.GH_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches" \
             -d '{"ref":"main"}' \
-            && echo "✅ Next run scheduled" \
-            || echo "⚠️ Failed to schedule (fallback to cron)"
+            && echo "✅ Scheduled" \
+            || echo "⚠️ Fallback to cron"
           echo "::endgroup::"
 
-      # ─────────── 📊 Summary ───────────
+      # ═══════════ 📊 Summary ═══════════
       - name: 📊 Job Summary
         if: always()
         run: |
-          echo "## ⚡ HiVo Compressor — Run Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎯 مرحله | ✅ وضعیت |" >> $GITHUB_STEP_SUMMARY
-          echo "|:---|:---:|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📥 Checkout | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎬 FFmpeg install | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🤖 Bot run | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| 💾 Data save | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🕐 **زمان:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## ⚡ HiVo Compressor — Run Report"
+            echo ""
+            echo "| 🎯 Stage | ✅ Status |"
+            echo "|:---|:---:|"
+            echo "| 📥 Checkout | ✅ |"
+            echo "| 🎬 Engines | ✅ |"
+            echo "| 🐍 Python | ✅ |"
+            echo "| 🤖 Bot runtime | ✅ |"
+            echo "| 💾 Data save | ✅ |"
+            echo ""
+            echo "**🕐 Started:** \`$(date -u '+%Y-%m-%d %H:%M:%S UTC')\`"
+            echo "**📦 Run ID:** \`${{ github.run_id }}\`"
+          } >> $GITHUB_STEP_SUMMARY
