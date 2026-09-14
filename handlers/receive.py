@@ -1,29 +1,37 @@
-"""📥 دریافت فایل"""
+"""
+📥 هندلر دریافت فایل
+"""
+import time
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from config import MAX_FILE_SIZE_MB, USERS_FILE, RATE_LIMIT_SECONDS
-from core.detector import detect_file_type, get_file_emoji, get_human_category
+from config import MAX_FILE_SIZE_MB, RATE_LIMIT_SECONDS
+from core.detector import get_file_emoji, get_human_category
 from ui import cards, keyboards
 from utils import load_json
+from config import USERS_FILE
 
 
 async def cmd_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     obj = None
 
-    if msg.video:      obj = msg.video
-    elif msg.document: obj = msg.document
-    elif msg.audio:    obj = msg.audio
-    elif msg.photo:    obj = msg.photo[-1]
-    elif msg.voice:    obj = msg.voice
+    if msg.video:
+        obj = msg.video
+    elif msg.document:
+        obj = msg.document
+    elif msg.audio:
+        obj = msg.audio
+    elif msg.photo:
+        obj = msg.photo[-1]
+    elif msg.voice:
+        obj = msg.voice
 
     if not obj:
         return
 
     # ─── Rate limit ───
-    import time
     now = time.time()
     last = ctx.user_data.get("last_request", 0)
     if now - last < RATE_LIMIT_SECONDS:
@@ -47,14 +55,22 @@ async def cmd_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ─── تشخیص نوع ───
-    name = getattr(obj, "file_name", f"file_{msg.message_id}")
-    mime = getattr(obj, "mime_type", "application/octet-stream")
+    # ─── ✅ تشخیص نوع (نسخه اصلاح‌شده) ───
+    name = getattr(obj, "file_name", None) or f"file_{msg.message_id}"
+    mime = getattr(obj, "mime_type", None) or "application/octet-stream"
 
-    # یه تشخیص سریع بر اساس نام و mime
+    # 🔒 اطمینان نهایی که name رشته است
+    if not isinstance(name, str):
+        name = f"file_{msg.message_id}"
+    if not isinstance(mime, str):
+        mime = "application/octet-stream"
+
     temp_name = name.lower()
+
     category = "unknown"
-    if mime.startswith("video/") or any(temp_name.endswith(e) for e in [".mp4",".mkv",".avi",".mov",".webm"]):
+    if mime.startswith("video/") or any(
+        temp_name.endswith(e) for e in [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".3gp"]
+    ):
         category = "video"
     elif mime.startswith("image/"):
         category = "gif" if temp_name.endswith(".gif") else "image"
@@ -62,7 +78,7 @@ async def cmd_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         category = "audio"
     elif temp_name.endswith(".pdf") or mime == "application/pdf":
         category = "pdf"
-    elif any(temp_name.endswith(e) for e in [".zip",".rar",".7z",".tar",".gz"]):
+    elif any(temp_name.endswith(e) for e in [".zip", ".rar", ".7z", ".tar", ".gz", ".xz", ".bz2", ".zst"]):
         category = "archive"
 
     emoji = get_file_emoji(category)
